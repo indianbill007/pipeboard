@@ -5,6 +5,9 @@
 logs/
 *.log
 
+# Run artifacts
+reports/
+
 # Python
 __pycache__/
 *.py[cod]

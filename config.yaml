@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 
 # Claude model to use. Opus gives better reasoning, Sonnet is faster/cheaper.
-model: "claude-sonnet-4-5"
+model: "claude-sonnet-4-6"
 
 # Which ad accounts to target. Use "all" or a list of account IDs.
 ad_accounts: "all"
@@ -25,26 +25,25 @@ min_age_hours: 24
 # -----------------------------------------------------------------------------
 pause_rules:
   # Pause if cost-per-result exceeds this value
-    max_cpa: 500
+  max_cpa: 500
 
-      # Pause if CTR falls below this (%) AND spend is above threshold below
-        min_ctr: 0.5
-          min_spend_for_ctr_rule: 1000
+  # Pause if CTR falls below this (%) AND spend is above threshold below
+  min_ctr: 0.5
+  min_spend_for_ctr_rule: 1000
 
-            # Pause if purchase ROAS drops below this floor
-              min_roas: 1.0
+  # Pause if purchase ROAS drops below this floor
+  min_roas: 1.0
 
-                # Pause if frequency (impressions per user) exceeds this (ad fatigue)
-                  max_frequency: 4.0
+  # Pause if frequency (impressions per user) exceeds this (ad fatigue)
+  max_frequency: 4.0
 
-                    # Pause if ad has spent more than this with zero conversions
-                      max_spend_zero_conv: 750
+  # Pause if ad has spent more than this with zero conversions
+  max_spend_zero_conv: 750
 
-                      # -----------------------------------------------------------------------------
-                      # Notifications (optional)
-                      # -----------------------------------------------------------------------------
-                      notify:
-                        email_enabled: false
-                          email_to: "sumit@chingari.io"
-                            slack_webhook: ""
-                            
+# -----------------------------------------------------------------------------
+# Notifications (optional)
+# -----------------------------------------------------------------------------
+notify:
+  email_enabled: false
+  email_to: "sumit@chingari.io"
+  slack_webhook: ""
