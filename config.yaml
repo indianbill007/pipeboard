@@ -44,7 +44,9 @@ pause_rules:
 
     act_475821441756869:      # Globussoft AI
       name: "Globussoft AI"
-      # TBD — fill thresholds for this account's objective
+      max_cpa: 1000              # more lenient than default (₹500) for this account
+      min_spend_before_eval: 1000  # give new ads ₹1000 to develop before judging
+      # max_frequency inherits from defaults (4.0)
 
     act_715702414895109:      # Social Reel Farm
       name: "Social Reel Farm"

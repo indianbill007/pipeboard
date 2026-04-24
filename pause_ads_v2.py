@@ -183,6 +183,10 @@ def evaluate(ad, insights, rules, min_age_hours) -> list:
         pass
 
     spend = float(insights.get("spend") or 0)
+    # Spend floor — under this threshold, don't judge the ad at all
+    if spend < rules.get("min_spend_before_eval", 0):
+        return []
+
     ctr = float(insights.get("ctr") or 0)
     frequency = float(insights.get("frequency") or 0)
 
