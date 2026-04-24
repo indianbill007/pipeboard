@@ -42,12 +42,23 @@ if not TOKEN:
 
 GRAPH = "https://graph.facebook.com/v21.0"
 
-# Meta returns two parallel conversion breakdowns:
-#   `actions`       — every engagement type (clicks, views, page-engagement, pixel events)
-#   `conversions`   — curated "business outcomes" matching what Ads Manager shows as Results
-# We use `conversions`. Sub-variants (`_website`, `_app`) often duplicate their `_total` sibling
-# with identical values, so we skip sub-variants when a `_total` counterpart is present.
+# Meta returns conversion data in two places depending on the ad's objective:
+#   `conversions` — curated "business outcomes" (what Ads Manager shows as Results).
+#                   Populated for purchase/submit-app-style ads. Empty for many lead-gen ads.
+#   `actions`     — every engagement event. Lead-gen ads put their leads here only.
+# Strategy: use `conversions` when populated; fall back to `actions` with family-based
+# deduplication (same conversion counted under multiple action_types with equal values).
 _VARIANT_SUFFIXES = ("_website", "_app", "_mobile_app", "_offline")
+
+# Within each family, the same conversions are counted multiple ways — take MAX to dedupe.
+_ACTION_CONVERSION_FAMILIES = {
+    "purchase":              ("purchase", "offsite_conversion.fb_pixel_purchase", "onsite_conversion.purchase", "omni_purchase"),
+    "lead":                  ("lead", "offsite_conversion.fb_pixel_lead", "onsite_web_lead"),
+    "submit_application":    ("submit_application", "offsite_conversion.fb_pixel_submit_application"),
+    "complete_registration": ("complete_registration", "offsite_conversion.fb_pixel_complete_registration"),
+    "subscribe":             ("subscribe", "offsite_conversion.fb_pixel_subscribe"),
+    "pixel_custom":          ("offsite_conversion.fb_pixel_custom",),
+}
 
 
 def graph(path: str, **params) -> dict:
@@ -94,9 +105,7 @@ def _dedupe_variants(entries):
     return result
 
 
-def sum_conversions(conversions_field) -> int:
-    if not conversions_field:
-        return 0
+def _sum_from_conversions(conversions_field) -> int:
     total = 0
     for e in _dedupe_variants(conversions_field):
         try:
@@ -104,6 +113,39 @@ def sum_conversions(conversions_field) -> int:
         except (TypeError, ValueError):
             pass
     return total
+
+
+def _sum_from_actions(actions_field) -> int:
+    """Fallback when conversions[] is empty — sum curated conversion action_types,
+    de-duplicating per family by taking MAX across equivalent types."""
+    if not actions_field:
+        return 0
+    by_type = {}
+    for a in actions_field:
+        at = a.get("action_type", "")
+        try:
+            by_type[at] = int(float(a.get("value", 0)))
+        except (TypeError, ValueError):
+            pass
+    total = 0
+    for family_types in _ACTION_CONVERSION_FAMILIES.values():
+        values = [by_type[t] for t in family_types if t in by_type]
+        if values:
+            total += max(values)
+    # Named custom-conversion IDs are independent events, sum them all
+    for at, v in by_type.items():
+        if at.startswith("offsite_conversion.custom."):
+            total += v
+    return total
+
+
+def count_conversions(insights) -> int:
+    """Use Meta's curated conversions field if populated; otherwise fall back
+    to actions[] with family-based deduplication."""
+    conv = insights.get("conversions")
+    if conv:
+        return _sum_from_conversions(conv)
+    return _sum_from_actions(insights.get("actions"))
 
 
 def sum_conversion_values(conversion_values_field) -> float:
@@ -144,7 +186,7 @@ def evaluate(ad, insights, rules, min_age_hours) -> list:
     ctr = float(insights.get("ctr") or 0)
     frequency = float(insights.get("frequency") or 0)
 
-    conversions = sum_conversions(insights.get("conversions"))
+    conversions = count_conversions(insights)
     revenue = sum_conversion_values(insights.get("conversion_values"))
     purchase_roas = pick_purchase_roas(insights.get("purchase_roas"))
     roas = purchase_roas if purchase_roas is not None else ((revenue / spend) if spend > 0 and revenue > 0 else None)
@@ -178,7 +220,7 @@ def fetch_ad_insights(account_id: str, ad_ids: list, lookback: int) -> dict:
     preset = f"last_{lookback}d" if lookback in (3, 7, 14, 28, 30, 90) else "last_3d"
     rows = graph_all(
         f"{account_id}/insights",
-        fields="ad_id,ad_name,spend,impressions,clicks,ctr,frequency,conversions,conversion_values,purchase_roas",
+        fields="ad_id,ad_name,spend,impressions,clicks,ctr,frequency,conversions,conversion_values,purchase_roas,actions",
         level="ad",
         filtering=json.dumps([{"field": "ad.id", "operator": "IN", "value": ad_ids}]),
         date_preset=preset,
