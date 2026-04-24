@@ -237,10 +237,19 @@ def main():
     args = p.parse_args()
 
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
-    rules = cfg["pause_rules"]
+    rules_cfg = cfg["pause_rules"]
+    defaults = rules_cfg["defaults"]
+    per_account = rules_cfg.get("accounts") or {}
     lookback = cfg.get("lookback_days", 3)
     min_age_hours = cfg.get("min_age_hours", 24)
     cfg_accounts = cfg.get("ad_accounts", "all")
+
+    def effective_rules_for(acc_id: str) -> dict:
+        """Merge defaults with per-account overrides; drop non-rule keys like `name`."""
+        merged = dict(defaults)
+        merged.update({k: v for k, v in (per_account.get(acc_id) or {}).items()
+                       if k != "name"})
+        return merged
 
     log.info("=" * 72)
     log.info(f"Run start | lookback={lookback}d | min_age={min_age_hours}h | DRY-RUN")
@@ -267,7 +276,10 @@ def main():
 
     for acc in targets:
         acc_id, acc_name, acc_num = acc["id"], acc["name"], acc["account_id"]
-        log.info(f"--- {acc_name} ({acc_id}) ---")
+        acc_rules = effective_rules_for(acc_id)
+        override_fields = sorted(set(acc_rules) - {k for k, v in defaults.items() if acc_rules.get(k) == v})
+        override_note = f"  overrides: {override_fields}" if per_account.get(acc_id) else "  (using defaults)"
+        log.info(f"--- {acc_name} ({acc_id}) ---{override_note}")
 
         try:
             ads = graph_all(
@@ -296,7 +308,7 @@ def main():
             if not ins:
                 continue
             evaluated += 1
-            for rule, value in evaluate(ad, ins, rules, min_age_hours):
+            for rule, value in evaluate(ad, ins, acc_rules, min_age_hours):
                 flagged.append({
                     "ad_id": ad["id"],
                     "name": ad["name"],

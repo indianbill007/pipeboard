@@ -1,47 +1,65 @@
 # -----------------------------------------------------------------------------
 # Pipeboard Meta Ads Automation - Configuration
 # -----------------------------------------------------------------------------
-# Edit these thresholds to tune when ads get paused.
-# All monetary values are in the ad account's native currency.
+# Each ad account can have its own pause-rule thresholds. Only list overrides
+# under an account; omitted fields inherit from `defaults`.
+# All monetary values are in the account's native currency.
 # -----------------------------------------------------------------------------
 
-# Claude model to use. Opus gives better reasoning, Sonnet is faster/cheaper.
+# Claude model (used by the legacy pause_ads.py only; pause_ads_v2.py ignores this).
 model: "claude-sonnet-4-6"
 
-# Which ad accounts to target. Use "all" or a list of account IDs.
+# Which ad accounts to target. Use "all" to scan every account visible to the
+# token, or a list of act_ ids to restrict. pause_ads_v2.py reads this.
 ad_accounts: "all"
-# ad_accounts:
-#   - "act_2025486534637313"
-#   - "act_715702414895109"
 
 # Lookback window (days) for performance metrics.
 lookback_days: 3
 
-# Do not touch ads newer than this (avoid killing ads still in learning).
+# Do not touch ads newer than this (avoid killing ads still in Meta's learning).
 min_age_hours: 24
 
 # -----------------------------------------------------------------------------
-# Pause rules - an ad is paused if ANY of these conditions is true.
+# Pause rules
+#
+# An ad is paused if ANY rule in its effective ruleset matches. The effective
+# ruleset for an account = `defaults` merged with `accounts.<act_id>`.
+# Account overrides win where they're specified.
 # -----------------------------------------------------------------------------
 pause_rules:
-  # Pause if cost-per-result exceeds this value
-  max_cpa: 500
 
-  # Pause if CTR falls below this (%) AND spend is above threshold below
-  min_ctr: 0.5
-  min_spend_for_ctr_rule: 1000
+  # Fallback thresholds used when an account has no override entry, or when
+  # an account override omits a given field.
+  defaults:
+    max_cpa: 500                 # pause if cost-per-result > this
+    min_ctr: 0.5                 # pause if CTR < this (%) AND spend > min_spend_for_ctr_rule
+    min_spend_for_ctr_rule: 1000
+    min_roas: 1.0                # pause if purchase ROAS < this
+    max_frequency: 4.0           # pause if frequency > this (ad fatigue)
+    max_spend_zero_conv: 750     # pause if spend > this with 0 conversions
 
-  # Pause if purchase ROAS drops below this floor
-  min_roas: 1.0
+  # Per-account overrides. Key is the ad account ID (act_...).
+  # Only include fields that should differ from defaults.
+  accounts:
 
-  # Pause if frequency (impressions per user) exceeds this (ad fatigue)
-  max_frequency: 4.0
+    act_475821441756869:      # Globussoft AI
+      name: "Globussoft AI"
+      # TBD — fill thresholds for this account's objective
 
-  # Pause if ad has spent more than this with zero conversions
-  max_spend_zero_conv: 750
+    act_715702414895109:      # Social Reel Farm
+      name: "Social Reel Farm"
+      # TBD
+
+    act_162086793500612:      # EmpMonitor Ads
+      name: "EmpMonitor Ads"
+      # TBD
+
+    act_2025486534637313:     # AdsGPT
+      name: "AdsGPT"
+      # TBD
 
 # -----------------------------------------------------------------------------
-# Notifications (optional)
+# Notifications (optional — not wired yet)
 # -----------------------------------------------------------------------------
 notify:
   email_enabled: false
