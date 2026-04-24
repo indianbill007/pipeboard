@@ -42,28 +42,12 @@ if not TOKEN:
 
 GRAPH = "https://graph.facebook.com/v21.0"
 
-# Action types that count as a "conversion" for CPA / zero-conv rules.
-# Broad set — matches standard, onsite, offsite, and lead events.
-# Custom pixel events (offsite_conversion.custom.<id>) matched via prefix.
-CONVERSION_TYPES = {
-    "purchase",
-    "offsite_conversion.fb_pixel_purchase",
-    "onsite_conversion.purchase",
-    "lead",
-    "offsite_conversion.fb_pixel_lead",
-    "onsite_conversion.lead_grouped",
-    "submit_application",
-    "offsite_conversion.fb_pixel_submit_application",
-    "complete_registration",
-    "offsite_conversion.fb_pixel_complete_registration",
-}
-CONVERSION_PREFIXES = ("offsite_conversion.custom.",)
-
-
-def is_conversion(action_type: str) -> bool:
-    return action_type in CONVERSION_TYPES or any(
-        action_type.startswith(p) for p in CONVERSION_PREFIXES
-    )
+# Meta returns two parallel conversion breakdowns:
+#   `actions`       — every engagement type (clicks, views, page-engagement, pixel events)
+#   `conversions`   — curated "business outcomes" matching what Ads Manager shows as Results
+# We use `conversions`. Sub-variants (`_website`, `_app`) often duplicate their `_total` sibling
+# with identical values, so we skip sub-variants when a `_total` counterpart is present.
+_VARIANT_SUFFIXES = ("_website", "_app", "_mobile_app", "_offline")
 
 
 def graph(path: str, **params) -> dict:
@@ -97,19 +81,53 @@ def graph_all(path: str, **params) -> list:
     return out
 
 
-def sum_conv_count(actions) -> int:
-    return sum(int(float(a.get("value", 0))) for a in (actions or []) if is_conversion(a.get("action_type", "")))
+def _dedupe_variants(entries):
+    """Drop `<family>_website`/`_app`/etc entries when `<family>_total` is also present."""
+    all_types = {e.get("action_type", "") for e in entries}
+    totals = {t[:-len("_total")] for t in all_types if t.endswith("_total")}
+    result = []
+    for e in entries:
+        at = e.get("action_type", "")
+        if any(at.endswith(s) and at[:-len(s)] in totals for s in _VARIANT_SUFFIXES):
+            continue
+        result.append(e)
+    return result
 
 
-def sum_conv_value(action_values) -> float:
-    total = 0.0
-    for a in action_values or []:
-        if is_conversion(a.get("action_type", "")):
-            try:
-                total += float(a.get("value", 0))
-            except (TypeError, ValueError):
-                pass
+def sum_conversions(conversions_field) -> int:
+    if not conversions_field:
+        return 0
+    total = 0
+    for e in _dedupe_variants(conversions_field):
+        try:
+            total += int(float(e.get("value", 0)))
+        except (TypeError, ValueError):
+            pass
     return total
+
+
+def sum_conversion_values(conversion_values_field) -> float:
+    if not conversion_values_field:
+        return 0.0
+    total = 0.0
+    for e in _dedupe_variants(conversion_values_field):
+        try:
+            total += float(e.get("value", 0))
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def pick_purchase_roas(roas_field) -> float | None:
+    """Meta returns purchase_roas as a list like [{'action_type':'omni_purchase','value':'2.54'}]."""
+    if not roas_field:
+        return None
+    for e in roas_field:
+        try:
+            return float(e.get("value", 0))
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def evaluate(ad, insights, rules, min_age_hours) -> list:
@@ -125,12 +143,11 @@ def evaluate(ad, insights, rules, min_age_hours) -> list:
     spend = float(insights.get("spend") or 0)
     ctr = float(insights.get("ctr") or 0)
     frequency = float(insights.get("frequency") or 0)
-    actions = insights.get("actions") or []
-    action_values = insights.get("action_values") or []
 
-    conversions = sum_conv_count(actions)
-    revenue = sum_conv_value(action_values)
-    roas = (revenue / spend) if spend > 0 else None
+    conversions = sum_conversions(insights.get("conversions"))
+    revenue = sum_conversion_values(insights.get("conversion_values"))
+    purchase_roas = pick_purchase_roas(insights.get("purchase_roas"))
+    roas = purchase_roas if purchase_roas is not None else ((revenue / spend) if spend > 0 and revenue > 0 else None)
 
     v = []
     if spend > rules["max_spend_zero_conv"] and conversions == 0:
@@ -161,7 +178,7 @@ def fetch_ad_insights(account_id: str, ad_ids: list, lookback: int) -> dict:
     preset = f"last_{lookback}d" if lookback in (3, 7, 14, 28, 30, 90) else "last_3d"
     rows = graph_all(
         f"{account_id}/insights",
-        fields="ad_id,ad_name,spend,impressions,clicks,ctr,frequency,actions,action_values",
+        fields="ad_id,ad_name,spend,impressions,clicks,ctr,frequency,conversions,conversion_values,purchase_roas",
         level="ad",
         filtering=json.dumps([{"field": "ad.id", "operator": "IN", "value": ad_ids}]),
         date_preset=preset,
